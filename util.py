@@ -5,7 +5,7 @@ import networkx as nx
 import math, pickle
 from matplotlib import pyplot as plt
 
-def display_learning_curves(history):
+def display_learning_curves(history,logscale=False):
 	#fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
 
 	plt.plot(history.history["loss"][1:], color='#009999',linewidth=3,alpha=.8)   #00cc00
@@ -14,13 +14,16 @@ def display_learning_curves(history):
 	plt.legend(["training", "validation"], loc="upper right")
 	plt.xlabel("Epochs")
 	plt.ylabel("Loss")
-	ax = plt.gca()
-	ax.set_yscale('log')
-	plt.show()
+	if logscale:
+		ax = plt.gca()
+		ax.set_yscale('log')
+	plt.savefig('training_history_long_ffnn2.png')
 	plt.clf()
 
 
-def get_real_data(params, use_dense=True, debug_with_toy=False):
+
+
+def get_real_data(params, use_dense=True):
 	net_file = './GRN'
 	data_file = './scRNA.pickle'
 	G = nx.read_edgelist(net_file)
@@ -39,16 +42,8 @@ def get_real_data(params, use_dense=True, debug_with_toy=False):
 
 	X = X.astype(float)
 
-	if debug_with_toy: # check that there is nothing weird going on
-		mean = np.mean(X,axis=1)
-		labels_1 = (mean >-.1)
-		labels_2 = (mean >-.01)
-		labels_3 = (mean >0)
-		labels_4 = (mean >.01)
-		labels_5 = (mean >.1)
-		labels = np.zeros(len(X))+labels_1+labels_2+labels_3+labels_4
-
-		Y, unq_labels = convert_to_1hot(labels)
+	unique, counts = np.unique(Y,axis=0,return_counts=True)
+	print("\tFrequency of each label:",counts) #,'\nunique=',unique)
 
 
 	#print("from original G, #nodes, #edges, #gene order=",len(G.nodes()),len(G.edges()), len(gene_order))
@@ -96,7 +91,7 @@ def scRNA_from_raw():
 			to_rm +=[g]
 	for g in to_rm:
 		G.remove_node(g)
-	print("at the end of writing #nodes =",len(G.nodes()))
+		
 	for e in G.edges():
 		assert(e[0] in G.nodes())
 		assert(e[1] in G.nodes())
@@ -113,7 +108,7 @@ def GRN_from_raw():
 	net_file = './GRN'
 	#edges = []
 	#all_nodes = []
-	zscore_thresh, corr_thresh = 30, .3 #10,.1 #20,.2
+	zscore_thresh, corr_thresh = 10,.1 #20,.2 (.5/50 for less data)
 	i=0
 	G=nx.empty_graph(create_using=nx.DiGraph())
 	with open(raw_file, 'r') as f:
@@ -151,12 +146,15 @@ def get_toy_data(params, soln='sum',use_dense=True):
 	scRNA = np.random.normal(size=(num_cells, num_nodes))
 
 	labels = np.random.choice([0,1,2],size=num_cells,p=[.3,.1,.6]) # where 0 refers to normal and 1 to cancerous or something
-	
+
 	if soln=='sum':
 		summ = np.sum(scRNA,axis=1)
-		labels_1 = (summ>.1)
-		labels_2 = (summ>.8)
-		labels = np.zeros(labels.shape)+labels_1+labels_2
+		labels_1 = (summ>-.1)
+		labels_2 = (summ>-.05)
+		labels_3 = (summ>0)
+		labels_4 = (summ>.05)
+		#labels_5 = (summ>.1)
+		labels = np.zeros(labels.shape)+labels_1+labels_2+labels_3+labels_4 #+labels_5
 	elif soln=='graph':
 		topo_sum = np.sum(A,axis=1)
 		assert(0) 
@@ -188,6 +186,8 @@ def unison_shuffled_copies(a, b):
 
 def trim_by_modulo(arr,m):
 	rem = len(arr)%m 
+	if rem==0:
+		return arr
 	return arr[:-rem]
 
 def split_data(params, scRNA, labels, train_split=.7,shuffle=True,validation=True, test_split=.3, cutoff=None):

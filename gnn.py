@@ -1,14 +1,5 @@
 # basically implemented attention: https://arxiv.org/pdf/1710.10903.pdf
 
-# TODO:
-# train w dense layer non-trainable
-# implmt ffwdNN, also compare with less data
-# !!check if this axis arg in call() is correct!! 
-
-# MaybeDO:
-# normz w.r.t ngh size
-# add self loops
-# remove bias?
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,6 +16,7 @@ class GNNLayer(tf.keras.layers.Layer):
 	def __init__(self, adj, input_shape, activation_fn):
 		super(GNNLayer, self).__init__()
 		self.adj =  tf.sparse.from_dense(adj)  # adjacency matrix
+		self.in_deg = tf.sparse.reduce_sum(self.adj, axis=1)
 
 		assert(isinstance(self.adj,tf.sparse.SparseTensor))
 		num_edges = len(self.adj.indices)
@@ -34,18 +26,21 @@ class GNNLayer(tf.keras.layers.Layer):
 
 		self.w = self.add_weight(
 			shape=(num_edges,),  
-			initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=1),
+			initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=1), #.05 stddev is default
 			trainable=True,
 			name='GNN conv weights'
 		)
 		self.self_w = self.add_weight(
 			shape=(input_shape[-1],),  
-			initializer="random_normal",
+			initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=1),
 			trainable=True,
 			name='GNN conv self weights'
 		)
 		self.b = self.add_weight(
-			shape=(input_shape[-1],), initializer="random_normal", trainable=True, name='GNN node bias'
+			shape=(input_shape[-1],), 
+			initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=1), 
+			trainable=True, 
+			name='GNN node bias'
 		) # doesn't like shape=(input_shape[-1]) or any variant, so just adding an extra dim and ignoring during call()
 
 		self.sources = self.adj.indices[:,0] # indices of source nodes for each edge
@@ -66,10 +61,10 @@ class GNNLayer(tf.keras.layers.Layer):
 		weighted_edges = (self.adj.values*edges_values*self.w)
 		weighted_edges = weighted_edges.reshape(self.batch_size*num_edges) # basically flatten it
 		weighted_nghs=tf.sparse.SparseTensor(self.adj3d_indices, weighted_edges, self.adj3d_shape)
-		weighted_ngh_sum = tf.sparse.reduce_sum(weighted_nghs, axis=1) 
+		weighted_ngh_sum = tf.sparse.reduce_sum(weighted_nghs, axis=1)/self.in_deg  
 
 		self_loop = inputs[0]*self.self_w
-		x = weighted_ngh_sum*self_loop + self.b
+		x = weighted_ngh_sum+self_loop + self.b
 
 		if self.activation_fn == 'sigmoid':
 			x = tf.math.sigmoid(x)
@@ -90,22 +85,33 @@ class GNN(tf.keras.Model):
 	def __init__(self,PARAMS, adj, input_shape,  num_classes=5):
 		super(GNN, self).__init__()
 		self.num_graph_layers = PARAMS['number_graph_layers']
-		self.graph_layers, self.dropouts = [], []
+		self.graph_layers = []
+		self.dropouts = []
 		for i in range(self.num_graph_layers):
 			self.graph_layers += [GNNLayer(adj, input_shape, PARAMS['graph_activation_function'])]
 			self.dropouts += [layers.Dropout(PARAMS['dropout_rate'])]
-			
+		
+		num_nodes = len(adj)
+		self.dense_dropout = layers.Dropout(PARAMS['dropout_rate'])
 		if PARAMS['trainable dense']:
-			self.classifier = layers.Dense(num_classes) 
+			#self.classifier1 = layers.Dense(int(num_nodes/50))
+			self.classifier2 = layers.Dense(num_classes) 
 		else:
-			self.classifier = layers.Dense(num_classes, trainable=False)
+			#self.classifier1 = layers.Dense(int(num_nodes/50), trainable=False)
+			self.classifier2 = layers.Dense(num_classes, trainable=False)
+		
 
 	def call(self, inputs):
 		x = inputs 
 		for i in range(self.num_graph_layers):
-			x = self.graph_layers[i](x)
 			x = self.dropouts[i](x)
-		x = self.classifier(x)
+			x = self.graph_layers[i](x)
+		#x = self.classifier1(x)
+		#tf.print('b4rr',x[:3,:3])
+		x = self.dense_dropout(x)
+		x = self.classifier2(x)
+		#tf.print('after',x[:3,:3],'\n\n')
+
 		return x
 
 
